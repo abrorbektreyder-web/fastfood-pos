@@ -18,7 +18,6 @@ import {
   Flame,
   ChevronDown,
   MapPin,
-  CreditCard,
 } from "lucide-react";
 import {
   AreaChart,
@@ -179,11 +178,10 @@ const App = () => {
       .select();
     setLoading(false);
 
-    if (!error) {
+    if (!error && data && data.length > 0) {
       setLastOrder({ ...orderData, id: data[0].id });
       setCart([]);
       setIsCartOpen(false);
-      // Kassirga ham, Mijozga ham chek ochamiz (lekin ko'rinishi farq qiladi)
       setShowReceipt(true);
     }
   };
@@ -334,7 +332,6 @@ const App = () => {
                 <span>${lastOrder.total.toFixed(1)}</span>
               </div>
 
-              {/* Agar Kassir bo'lsa - CHOP ETISH */}
               {role === "cashier" ? (
                 <button
                   onClick={handlePrint}
@@ -343,7 +340,6 @@ const App = () => {
                   <Printer size={20} /> CHOP ETISH
                 </button>
               ) : (
-                // Agar Mijoz bo'lsa - ELEKTRON CHEK (To'lov info)
                 <div className="mt-6 bg-emerald-50 border border-emerald-100 p-4 rounded-xl text-center">
                   <p className="text-emerald-700 font-bold text-lg flex justify-center items-center gap-2">
                     <CheckCircle size={20} /> Qabul qilindi!
@@ -360,7 +356,6 @@ const App = () => {
           </div>
         )}
 
-        {/* 1. MENYU QISMI (Tuzatilgan) */}
         <div className="flex-1 flex flex-col h-full overflow-hidden relative print:hidden">
           <div className="bg-white px-6 py-4 shadow-sm flex justify-between items-center z-10 border-b border-slate-100 shrink-0">
             <div className="flex items-center gap-3">
@@ -449,7 +444,7 @@ const App = () => {
           </div>
         </div>
 
-        {/* 2. SAVAT (Kompyuter) */}
+        {/* SAVAT (Kompyuter) */}
         <div className="hidden md:flex w-[400px] bg-white border-l border-slate-200 flex-col shadow-xl z-20 h-full shrink-0">
           <div className="p-6 bg-white border-b border-slate-100 flex justify-between items-center shrink-0">
             <h3 className="font-black text-xl text-slate-800 flex items-center gap-2">
@@ -515,7 +510,7 @@ const App = () => {
           </div>
         </div>
 
-        {/* 3. SAVAT (Mobil) */}
+        {/* SAVAT (Mobil) */}
         <div className="md:hidden fixed bottom-6 left-1/2 transform -translate-x-1/2 z-40 w-[90%]">
           <button
             onClick={() => setIsCartOpen(true)}
@@ -617,7 +612,7 @@ const App = () => {
     );
   }
 
-  // ADMIN (Qisqartirilgan)
+  // ADMIN
   if (role === "admin") {
     return (
       <div
