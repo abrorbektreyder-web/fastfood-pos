@@ -17,6 +17,7 @@ import {
   IceCream,
   Flame,
   ChevronDown,
+  MapPin,
 } from "lucide-react";
 import {
   AreaChart,
@@ -41,6 +42,7 @@ const CATEGORIES = [
 
 const App = () => {
   const [role, setRole] = useState(null);
+  const [tableNumber, setTableNumber] = useState(null); // STOL RAQAMI
   const [menu, setMenu] = useState([]);
   const [orders, setOrders] = useState([]);
   const [cart, setCart] = useState([]);
@@ -51,7 +53,34 @@ const App = () => {
   const [lastOrder, setLastOrder] = useState(null);
   const [isCartOpen, setIsCartOpen] = useState(false);
 
-  // --- FUNKSIYALAR ---
+  useEffect(() => {
+    // 1. URL dan stol raqamini olish (?table=5)
+    const params = new URLSearchParams(window.location.search);
+    const table = params.get("table");
+    if (table) {
+      setTableNumber(table);
+      setRole("customer"); // Avtomatik mijoz rejimi
+    }
+
+    cleanAndInitializeMenu();
+    fetchOrders();
+
+    const channel = supabase
+      .channel("realtime_orders")
+      .on(
+        "postgres_changes",
+        { event: "INSERT", schema: "public", table: "orders" },
+        (payload) => {
+          setOrders((prev) => [payload.new, ...prev]);
+          // Agar Kassir/Admin bo'lsa va yangi zakaz kelsa - signal chalinishi mumkin (kelajakda)
+        }
+      )
+      .subscribe();
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, []);
+
   async function cleanAndInitializeMenu() {
     const { data: existingData } = await supabase.from("menu").select("*");
     const idealMenu = [
@@ -97,16 +126,6 @@ const App = () => {
     setMenu(uniqueMenu);
   }
 
-  async function fetchMenu() {
-    const { data } = await supabase.from("menu").select("*").order("name");
-    if (data) {
-      const uniqueData = data.filter(
-        (v, i, a) => a.findIndex((v2) => v2.name === v.name) === i
-      );
-      setMenu(uniqueData);
-    }
-  }
-
   async function fetchOrders() {
     const { data } = await supabase
       .from("orders")
@@ -114,24 +133,6 @@ const App = () => {
       .order("created_at", { ascending: false });
     if (data) setOrders(data);
   }
-
-  useEffect(() => {
-    cleanAndInitializeMenu();
-    fetchOrders();
-    const channel = supabase
-      .channel("realtime_orders")
-      .on(
-        "postgres_changes",
-        { event: "INSERT", schema: "public", table: "orders" },
-        (payload) => {
-          setOrders((prev) => [payload.new, ...prev]);
-        }
-      )
-      .subscribe();
-    return () => {
-      supabase.removeChannel(channel);
-    };
-  }, []);
 
   const addToCart = (item) => {
     setCart((prev) => {
@@ -151,16 +152,29 @@ const App = () => {
   const submitOrder = async () => {
     if (cart.length === 0) return;
     setLoading(true);
+
+    // Zakazga stol raqamini qo'shamiz
+    const orderNote = tableNumber
+      ? `STOL №${tableNumber}`
+      : role === "cashier"
+      ? "KASSADAN"
+      : "ONLAYN";
+
     const orderData = {
       items: cart,
       total: cartTotal,
       created_at: new Date().toISOString(),
+      // Bazada "note" degan ustun bo'lmasa ham, JSON ichiga tiqib ketish mumkin yoki keyin ustun qo'shamiz
+      // Hozircha items ichiga qo'shib qo'yamiz vizual ko'rinishi uchun
+      table_number: orderNote,
     };
+
     const { data, error } = await supabase
       .from("orders")
       .insert([orderData])
       .select();
     setLoading(false);
+
     if (!error) {
       setLastOrder({ ...orderData, id: data[0].id });
       setShowReceipt(true);
@@ -215,6 +229,7 @@ const App = () => {
     return "🍽️";
   };
 
+  // --- 1. LOGIN (FAKAT KASSIR VA ADMIN UCHUN) ---
   if (!role) {
     return (
       <div
@@ -244,12 +259,24 @@ const App = () => {
           >
             <Settings /> ADMIN PANELI
           </button>
+          <div className="mt-6 pt-6 border-t border-slate-700">
+            <p className="text-xs text-slate-500 mb-2">
+              QR Menyu uchun namuna:
+            </p>
+            <a
+              href="/?table=1"
+              className="text-amber-500 text-xs hover:underline"
+            >
+              1-stol sifatida kirish
+            </a>
+          </div>
         </div>
       </div>
     );
   }
 
-  if (role === "cashier") {
+  // --- 2. KASSIR VA MIJOZ EKRANI (BIR XIL, LEKIN MIJOZDA CHIQISH YO'Q) ---
+  if (role === "cashier" || role === "customer") {
     return (
       <div
         className="min-h-screen bg-slate-50 flex flex-col md:flex-row h-screen overflow-hidden notranslate"
@@ -258,7 +285,6 @@ const App = () => {
         {showReceipt && lastOrder && (
           <div className="fixed inset-0 bg-black/80 z-[60] flex items-center justify-center p-4 print:bg-white print:p-0 backdrop-blur-sm">
             <div className="bg-white w-full max-w-sm p-6 rounded-3xl shadow-2xl relative print:w-full print:shadow-none print:rounded-none overflow-hidden">
-              <div className="absolute top-0 left-0 w-full h-3 bg-slate-800 print:hidden"></div>
               <button
                 onClick={() => setShowReceipt(false)}
                 className="absolute top-5 right-5 text-slate-400 hover:text-red-500 print:hidden bg-slate-100 p-2 rounded-full"
@@ -277,10 +303,13 @@ const App = () => {
                 </p>
                 <div className="bg-slate-100 inline-block px-3 py-1 rounded-lg mt-2">
                   <h3 className="text-sm font-bold text-slate-700">
-                    CHEK #{lastOrder.id}
+                    {lastOrder.table_number
+                      ? lastOrder.table_number
+                      : `CHEK #${lastOrder.id}`}
                   </h3>
                 </div>
               </div>
+              {/* ... Chek davomi ... */}
               <div className="space-y-3 mb-6">
                 {lastOrder.items.map((item, i) => (
                   <div
@@ -301,17 +330,14 @@ const App = () => {
                 <span>JAMI:</span>
                 <span>${lastOrder.total.toFixed(1)}</span>
               </div>
-              <button
-                onClick={handlePrint}
-                className="w-full bg-slate-900 text-white py-4 rounded-xl font-bold mt-8 flex items-center justify-center gap-2 print:hidden hover:bg-slate-800 active:scale-95 transition shadow-xl"
-              >
-                <Printer size={20} /> CHOP ETISH
-              </button>
+              {/* Agar mijoz bo'lsa, "Ofitsiantni chaqirish" chiqishi mumkin */}
+              <p className="text-center text-emerald-600 font-bold mt-4 animate-pulse">
+                Zakazingiz qabul qilindi!
+              </p>
             </div>
           </div>
         )}
 
-        {/* 1. ASOSIY OYNA (MENYU) - Chap Tomon */}
         <div className="flex-1 flex flex-col h-full overflow-hidden relative">
           <div className="bg-white px-6 py-4 shadow-sm flex justify-between items-center z-10 border-b border-slate-100 shrink-0">
             <div className="flex items-center gap-3">
@@ -322,27 +348,35 @@ const App = () => {
                 <h2 className="font-black text-xl text-slate-800 tracking-tight leading-none">
                   MENYU
                 </h2>
-                <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest">
-                  Kassir Paneli
-                </p>
+                {tableNumber ? (
+                  <p className="text-xs text-emerald-600 font-bold bg-emerald-50 px-2 py-0.5 rounded mt-1 flex items-center gap-1">
+                    <MapPin size={10} /> STOL №{tableNumber}
+                  </p>
+                ) : (
+                  <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest">
+                    Kassir Paneli
+                  </p>
+                )}
               </div>
             </div>
-            <div className="flex gap-2">
-              <button
-                onClick={() => {
-                  cleanAndInitializeMenu();
-                }}
-                className="p-3 bg-slate-100 text-slate-600 rounded-xl hover:bg-slate-200 transition"
-              >
-                <RefreshCw size={20} />
-              </button>
-              <button
-                onClick={() => setRole(null)}
-                className="flex items-center gap-2 text-red-500 text-xs font-bold bg-red-50 px-4 py-2 rounded-xl hover:bg-red-100 transition"
-              >
-                <LogOut size={16} /> Chiqish
-              </button>
-            </div>
+            {role === "cashier" && (
+              <div className="flex gap-2">
+                <button
+                  onClick={() => {
+                    cleanAndInitializeMenu();
+                  }}
+                  className="p-3 bg-slate-100 text-slate-600 rounded-xl hover:bg-slate-200 transition"
+                >
+                  <RefreshCw size={20} />
+                </button>
+                <button
+                  onClick={() => setRole(null)}
+                  className="flex items-center gap-2 text-red-500 text-xs font-bold bg-red-50 px-4 py-2 rounded-xl hover:bg-red-100 transition"
+                >
+                  <LogOut size={16} /> Chiqish
+                </button>
+              </div>
+            )}
           </div>
 
           <div className="bg-white border-b border-slate-100 overflow-x-auto flex gap-3 p-3 scrollbar-hide shrink-0">
@@ -392,7 +426,7 @@ const App = () => {
           </div>
         </div>
 
-        {/* 2. SAVAT - KOMPYUTERDA (O'ng tomon) */}
+        {/* SAVAT (Kompyuter) */}
         <div className="hidden md:flex w-[400px] bg-white border-l border-slate-200 flex-col shadow-xl z-20 h-full shrink-0">
           <div className="p-6 bg-white border-b border-slate-100 flex justify-between items-center shrink-0">
             <h3 className="font-black text-xl text-slate-800 flex items-center gap-2">
@@ -404,46 +438,37 @@ const App = () => {
             </span>
           </div>
           <div className="flex-1 overflow-y-auto p-4 space-y-3 bg-white">
-            {cart.length === 0 ? (
-              <div className="flex flex-col items-center justify-center h-full text-slate-300 space-y-4">
-                <ShoppingBasketIcon size={80} className="opacity-20" />
-                <p className="text-sm font-medium text-slate-400">
-                  Hozircha bo'sh...
-                </p>
-              </div>
-            ) : (
-              cart.map((item, idx) => (
-                <div
-                  key={idx}
-                  className="flex justify-between items-center bg-slate-50 p-3 rounded-2xl border border-slate-100 group hover:border-amber-200 transition"
-                >
-                  <div className="flex items-center gap-4">
-                    <div className="w-12 h-12 bg-white rounded-xl flex items-center justify-center text-2xl shadow-sm border border-slate-100">
-                      {getItemIcon(item.name, item.category)}
-                    </div>
-                    <div>
-                      <div className="font-bold text-sm text-slate-800">
-                        {item.name}
-                      </div>
-                      <div className="text-xs text-slate-500 font-bold mt-0.5">
-                        ${item.price} x {item.qty}
-                      </div>
-                    </div>
+            {cart.map((item, idx) => (
+              <div
+                key={idx}
+                className="flex justify-between items-center bg-slate-50 p-3 rounded-2xl border border-slate-100 group hover:border-amber-200 transition"
+              >
+                <div className="flex items-center gap-4">
+                  <div className="w-12 h-12 bg-white rounded-xl flex items-center justify-center text-2xl shadow-sm border border-slate-100">
+                    {getItemIcon(item.name, item.category)}
                   </div>
-                  <div className="flex items-center gap-3">
-                    <span className="font-black text-slate-800 text-lg">
-                      ${(item.price * item.qty).toFixed(1)}
-                    </span>
-                    <button
-                      onClick={() => removeFromCart(item.id)}
-                      className="w-9 h-9 flex items-center justify-center bg-white text-slate-300 border border-slate-200 rounded-xl hover:bg-red-500 hover:text-white hover:border-red-500 transition shadow-sm"
-                    >
-                      <Trash2 size={18} />
-                    </button>
+                  <div>
+                    <div className="font-bold text-sm text-slate-800">
+                      {item.name}
+                    </div>
+                    <div className="text-xs text-slate-500 font-bold mt-0.5">
+                      ${item.price} x {item.qty}
+                    </div>
                   </div>
                 </div>
-              ))
-            )}
+                <div className="flex items-center gap-3">
+                  <span className="font-black text-slate-800 text-lg">
+                    ${(item.price * item.qty).toFixed(1)}
+                  </span>
+                  <button
+                    onClick={() => removeFromCart(item.id)}
+                    className="w-9 h-9 flex items-center justify-center bg-white text-slate-300 border border-slate-200 rounded-xl hover:bg-red-500 hover:text-white hover:border-red-500 transition shadow-sm"
+                  >
+                    <Trash2 size={18} />
+                  </button>
+                </div>
+              </div>
+            ))}
           </div>
           <div className="p-6 bg-white border-t border-slate-100 space-y-4 shadow-[0_-10px_40px_rgba(0,0,0,0.05)] z-20">
             <div className="flex justify-between text-3xl font-black text-slate-900 tracking-tight">
@@ -467,7 +492,7 @@ const App = () => {
           </div>
         </div>
 
-        {/* 3. SAVAT - TELEFONDA */}
+        {/* SAVAT (Mobil) */}
         <div className="md:hidden fixed bottom-6 left-1/2 transform -translate-x-1/2 z-40 w-[90%]">
           <button
             onClick={() => setIsCartOpen(true)}
@@ -482,7 +507,6 @@ const App = () => {
             <span className="font-black text-lg">${cartTotal.toFixed(1)}</span>
           </button>
         </div>
-
         <div
           className={`fixed inset-0 z-50 bg-black/50 transition-opacity duration-300 md:hidden ${
             isCartOpen ? "opacity-100 visible" : "opacity-0 invisible"
@@ -512,46 +536,37 @@ const App = () => {
               </button>
             </div>
             <div className="flex-1 overflow-y-auto p-4 space-y-3 bg-white">
-              {cart.length === 0 ? (
-                <div className="flex flex-col items-center justify-center h-full text-slate-300 space-y-4">
-                  <ShoppingBasketIcon size={80} className="opacity-20" />
-                  <p className="text-sm font-medium text-slate-400">
-                    Hozircha bo'sh...
-                  </p>
-                </div>
-              ) : (
-                cart.map((item, idx) => (
-                  <div
-                    key={idx}
-                    className="flex justify-between items-center bg-slate-50 p-3 rounded-2xl border border-slate-100 group hover:border-amber-200 transition"
-                  >
-                    <div className="flex items-center gap-4">
-                      <div className="w-12 h-12 bg-white rounded-xl flex items-center justify-center text-2xl shadow-sm border border-slate-100">
-                        {getItemIcon(item.name, item.category)}
-                      </div>
-                      <div>
-                        <div className="font-bold text-sm text-slate-800">
-                          {item.name}
-                        </div>
-                        <div className="text-xs text-slate-500 font-bold mt-0.5">
-                          ${item.price} x {item.qty}
-                        </div>
-                      </div>
+              {cart.map((item, idx) => (
+                <div
+                  key={idx}
+                  className="flex justify-between items-center bg-slate-50 p-3 rounded-2xl border border-slate-100 group hover:border-amber-200 transition"
+                >
+                  <div className="flex items-center gap-4">
+                    <div className="w-12 h-12 bg-white rounded-xl flex items-center justify-center text-2xl shadow-sm border border-slate-100">
+                      {getItemIcon(item.name, item.category)}
                     </div>
-                    <div className="flex items-center gap-3">
-                      <span className="font-black text-slate-800 text-lg">
-                        ${(item.price * item.qty).toFixed(1)}
-                      </span>
-                      <button
-                        onClick={() => removeFromCart(item.id)}
-                        className="w-9 h-9 flex items-center justify-center bg-white text-slate-300 border border-slate-200 rounded-xl hover:bg-red-500 hover:text-white hover:border-red-500 transition shadow-sm"
-                      >
-                        <Trash2 size={18} />
-                      </button>
+                    <div>
+                      <div className="font-bold text-sm text-slate-800">
+                        {item.name}
+                      </div>
+                      <div className="text-xs text-slate-500 font-bold mt-0.5">
+                        ${item.price} x {item.qty}
+                      </div>
                     </div>
                   </div>
-                ))
-              )}
+                  <div className="flex items-center gap-3">
+                    <span className="font-black text-slate-800 text-lg">
+                      ${(item.price * item.qty).toFixed(1)}
+                    </span>
+                    <button
+                      onClick={() => removeFromCart(item.id)}
+                      className="w-9 h-9 flex items-center justify-center bg-white text-slate-300 border border-slate-200 rounded-xl hover:bg-red-500 hover:text-white hover:border-red-500 transition shadow-sm"
+                    >
+                      <Trash2 size={18} />
+                    </button>
+                  </div>
+                </div>
+              ))}
             </div>
             <div className="p-6 bg-white border-t border-slate-100 space-y-4 shadow-[0_-10px_40px_rgba(0,0,0,0.05)] z-20 pb-8">
               <div className="flex justify-between text-3xl font-black text-slate-900 tracking-tight">
@@ -579,6 +594,7 @@ const App = () => {
     );
   }
 
+  // 3. ADMIN (Qisqartirilgan)
   if (role === "admin") {
     return (
       <div
@@ -742,7 +758,12 @@ const App = () => {
                   className="bg-white p-5 rounded-3xl shadow-sm border border-slate-100 flex justify-between items-center hover:shadow-md transition"
                 >
                   <div>
-                    <div className="font-black text-slate-800 text-lg mb-1">
+                    <div className="font-black text-slate-800 text-lg mb-1 flex items-center gap-2">
+                      {order.table_number ? (
+                        <span className="bg-emerald-100 text-emerald-700 text-xs px-2 py-1 rounded font-bold">
+                          {order.table_number}
+                        </span>
+                      ) : null}{" "}
                       Buyurtma #{order.id}
                     </div>
                     <div className="text-xs text-slate-400 font-medium bg-slate-100 px-2 py-1 rounded-lg w-fit">
