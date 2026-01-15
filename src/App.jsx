@@ -18,6 +18,7 @@ import {
   Flame,
   ChevronDown,
   MapPin,
+  CreditCard,
 } from "lucide-react";
 import {
   AreaChart,
@@ -42,7 +43,7 @@ const CATEGORIES = [
 
 const App = () => {
   const [role, setRole] = useState(null);
-  const [tableNumber, setTableNumber] = useState(null); // STOL RAQAMI
+  const [tableNumber, setTableNumber] = useState(null);
   const [menu, setMenu] = useState([]);
   const [orders, setOrders] = useState([]);
   const [cart, setCart] = useState([]);
@@ -53,34 +54,7 @@ const App = () => {
   const [lastOrder, setLastOrder] = useState(null);
   const [isCartOpen, setIsCartOpen] = useState(false);
 
-  useEffect(() => {
-    // 1. URL dan stol raqamini olish (?table=5)
-    const params = new URLSearchParams(window.location.search);
-    const table = params.get("table");
-    if (table) {
-      setTableNumber(table);
-      setRole("customer"); // Avtomatik mijoz rejimi
-    }
-
-    cleanAndInitializeMenu();
-    fetchOrders();
-
-    const channel = supabase
-      .channel("realtime_orders")
-      .on(
-        "postgres_changes",
-        { event: "INSERT", schema: "public", table: "orders" },
-        (payload) => {
-          setOrders((prev) => [payload.new, ...prev]);
-          // Agar Kassir/Admin bo'lsa va yangi zakaz kelsa - signal chalinishi mumkin (kelajakda)
-        }
-      )
-      .subscribe();
-    return () => {
-      supabase.removeChannel(channel);
-    };
-  }, []);
-
+  // --- FUNKSIYALAR ---
   async function cleanAndInitializeMenu() {
     const { data: existingData } = await supabase.from("menu").select("*");
     const idealMenu = [
@@ -126,6 +100,16 @@ const App = () => {
     setMenu(uniqueMenu);
   }
 
+  async function fetchMenu() {
+    const { data } = await supabase.from("menu").select("*").order("name");
+    if (data) {
+      const uniqueData = data.filter(
+        (v, i, a) => a.findIndex((v2) => v2.name === v.name) === i
+      );
+      setMenu(uniqueData);
+    }
+  }
+
   async function fetchOrders() {
     const { data } = await supabase
       .from("orders")
@@ -133,6 +117,30 @@ const App = () => {
       .order("created_at", { ascending: false });
     if (data) setOrders(data);
   }
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const table = params.get("table");
+    if (table) {
+      setTableNumber(table);
+      setRole("customer");
+    }
+    cleanAndInitializeMenu();
+    fetchOrders();
+    const channel = supabase
+      .channel("realtime_orders")
+      .on(
+        "postgres_changes",
+        { event: "INSERT", schema: "public", table: "orders" },
+        (payload) => {
+          setOrders((prev) => [payload.new, ...prev]);
+        }
+      )
+      .subscribe();
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, []);
 
   const addToCart = (item) => {
     setCart((prev) => {
@@ -153,19 +161,15 @@ const App = () => {
     if (cart.length === 0) return;
     setLoading(true);
 
-    // Zakazga stol raqamini qo'shamiz
     const orderNote = tableNumber
       ? `STOL №${tableNumber}`
       : role === "cashier"
       ? "KASSADAN"
       : "ONLAYN";
-
     const orderData = {
       items: cart,
       total: cartTotal,
       created_at: new Date().toISOString(),
-      // Bazada "note" degan ustun bo'lmasa ham, JSON ichiga tiqib ketish mumkin yoki keyin ustun qo'shamiz
-      // Hozircha items ichiga qo'shib qo'yamiz vizual ko'rinishi uchun
       table_number: orderNote,
     };
 
@@ -177,9 +181,10 @@ const App = () => {
 
     if (!error) {
       setLastOrder({ ...orderData, id: data[0].id });
-      setShowReceipt(true);
       setCart([]);
       setIsCartOpen(false);
+      // Kassirga ham, Mijozga ham chek ochamiz (lekin ko'rinishi farq qiladi)
+      setShowReceipt(true);
     }
   };
 
@@ -229,7 +234,7 @@ const App = () => {
     return "🍽️";
   };
 
-  // --- 1. LOGIN (FAKAT KASSIR VA ADMIN UCHUN) ---
+  // --- LOGIN ---
   if (!role) {
     return (
       <div
@@ -260,14 +265,12 @@ const App = () => {
             <Settings /> ADMIN PANELI
           </button>
           <div className="mt-6 pt-6 border-t border-slate-700">
-            <p className="text-xs text-slate-500 mb-2">
-              QR Menyu uchun namuna:
-            </p>
+            <p className="text-xs text-slate-500 mb-2">QR Menyu namuna:</p>
             <a
               href="/?table=1"
               className="text-amber-500 text-xs hover:underline"
             >
-              1-stol sifatida kirish
+              1-stol
             </a>
           </div>
         </div>
@@ -275,7 +278,7 @@ const App = () => {
     );
   }
 
-  // --- 2. KASSIR VA MIJOZ EKRANI (BIR XIL, LEKIN MIJOZDA CHIQISH YO'Q) ---
+  // --- KASSIR VA MIJOZ ---
   if (role === "cashier" || role === "customer") {
     return (
       <div
@@ -285,6 +288,7 @@ const App = () => {
         {showReceipt && lastOrder && (
           <div className="fixed inset-0 bg-black/80 z-[60] flex items-center justify-center p-4 print:bg-white print:p-0 backdrop-blur-sm">
             <div className="bg-white w-full max-w-sm p-6 rounded-3xl shadow-2xl relative print:w-full print:shadow-none print:rounded-none overflow-hidden">
+              <div className="absolute top-0 left-0 w-full h-3 bg-slate-800 print:hidden"></div>
               <button
                 onClick={() => setShowReceipt(false)}
                 className="absolute top-5 right-5 text-slate-400 hover:text-red-500 print:hidden bg-slate-100 p-2 rounded-full"
@@ -309,7 +313,6 @@ const App = () => {
                   </h3>
                 </div>
               </div>
-              {/* ... Chek davomi ... */}
               <div className="space-y-3 mb-6">
                 {lastOrder.items.map((item, i) => (
                   <div
@@ -330,15 +333,35 @@ const App = () => {
                 <span>JAMI:</span>
                 <span>${lastOrder.total.toFixed(1)}</span>
               </div>
-              {/* Agar mijoz bo'lsa, "Ofitsiantni chaqirish" chiqishi mumkin */}
-              <p className="text-center text-emerald-600 font-bold mt-4 animate-pulse">
-                Zakazingiz qabul qilindi!
-              </p>
+
+              {/* Agar Kassir bo'lsa - CHOP ETISH */}
+              {role === "cashier" ? (
+                <button
+                  onClick={handlePrint}
+                  className="w-full bg-slate-900 text-white py-4 rounded-xl font-bold mt-8 flex items-center justify-center gap-2 print:hidden hover:bg-slate-800 active:scale-95 transition shadow-xl"
+                >
+                  <Printer size={20} /> CHOP ETISH
+                </button>
+              ) : (
+                // Agar Mijoz bo'lsa - ELEKTRON CHEK (To'lov info)
+                <div className="mt-6 bg-emerald-50 border border-emerald-100 p-4 rounded-xl text-center">
+                  <p className="text-emerald-700 font-bold text-lg flex justify-center items-center gap-2">
+                    <CheckCircle size={20} /> Qabul qilindi!
+                  </p>
+                  <p className="text-xs text-emerald-600 mt-1">
+                    To'lovni kassada yoki ofitsiantga qilishingiz mumkin.
+                  </p>
+                  <p className="text-[10px] text-slate-400 mt-3 uppercase tracking-widest">
+                    SCREENSHOT QILIB OLING
+                  </p>
+                </div>
+              )}
             </div>
           </div>
         )}
 
-        <div className="flex-1 flex flex-col h-full overflow-hidden relative">
+        {/* 1. MENYU QISMI (Tuzatilgan) */}
+        <div className="flex-1 flex flex-col h-full overflow-hidden relative print:hidden">
           <div className="bg-white px-6 py-4 shadow-sm flex justify-between items-center z-10 border-b border-slate-100 shrink-0">
             <div className="flex items-center gap-3">
               <div className="w-10 h-10 bg-gradient-to-br from-amber-400 to-orange-500 rounded-xl flex items-center justify-center shadow-lg shadow-orange-500/30 transform -rotate-6">
@@ -426,7 +449,7 @@ const App = () => {
           </div>
         </div>
 
-        {/* SAVAT (Kompyuter) */}
+        {/* 2. SAVAT (Kompyuter) */}
         <div className="hidden md:flex w-[400px] bg-white border-l border-slate-200 flex-col shadow-xl z-20 h-full shrink-0">
           <div className="p-6 bg-white border-b border-slate-100 flex justify-between items-center shrink-0">
             <h3 className="font-black text-xl text-slate-800 flex items-center gap-2">
@@ -492,7 +515,7 @@ const App = () => {
           </div>
         </div>
 
-        {/* SAVAT (Mobil) */}
+        {/* 3. SAVAT (Mobil) */}
         <div className="md:hidden fixed bottom-6 left-1/2 transform -translate-x-1/2 z-40 w-[90%]">
           <button
             onClick={() => setIsCartOpen(true)}
@@ -594,7 +617,7 @@ const App = () => {
     );
   }
 
-  // 3. ADMIN (Qisqartirilgan)
+  // ADMIN (Qisqartirilgan)
   if (role === "admin") {
     return (
       <div
