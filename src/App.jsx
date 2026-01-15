@@ -49,28 +49,9 @@ const App = () => {
   const [loading, setLoading] = useState(false);
   const [showReceipt, setShowReceipt] = useState(false);
   const [lastOrder, setLastOrder] = useState(null);
-
-  // YANGI: Telefonda savatni ochish/yopish
   const [isCartOpen, setIsCartOpen] = useState(false);
 
-  useEffect(() => {
-    cleanAndInitializeMenu();
-    fetchOrders();
-    const channel = supabase
-      .channel("realtime_orders")
-      .on(
-        "postgres_changes",
-        { event: "INSERT", schema: "public", table: "orders" },
-        (payload) => {
-          setOrders((prev) => [payload.new, ...prev]);
-        }
-      )
-      .subscribe();
-    return () => {
-      supabase.removeChannel(channel);
-    };
-  }, []);
-
+  // --- FUNKSIYALAR ---
   async function cleanAndInitializeMenu() {
     const { data: existingData } = await supabase.from("menu").select("*");
     const idealMenu = [
@@ -134,6 +115,24 @@ const App = () => {
     if (data) setOrders(data);
   }
 
+  useEffect(() => {
+    cleanAndInitializeMenu();
+    fetchOrders();
+    const channel = supabase
+      .channel("realtime_orders")
+      .on(
+        "postgres_changes",
+        { event: "INSERT", schema: "public", table: "orders" },
+        (payload) => {
+          setOrders((prev) => [payload.new, ...prev]);
+        }
+      )
+      .subscribe();
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, []);
+
   const addToCart = (item) => {
     setCart((prev) => {
       const existing = prev.find((i) => i.id === item.id);
@@ -166,7 +165,7 @@ const App = () => {
       setLastOrder({ ...orderData, id: data[0].id });
       setShowReceipt(true);
       setCart([]);
-      setIsCartOpen(false); // Savatni yopamiz
+      setIsCartOpen(false);
     }
   };
 
@@ -312,8 +311,9 @@ const App = () => {
           </div>
         )}
 
-        <div className="flex-1 flex flex-col overflow-hidden relative print:hidden pb-24 md:pb-0">
-          <div className="bg-white px-6 py-4 shadow-sm flex justify-between items-center z-10 border-b border-slate-100">
+        {/* 1. ASOSIY OYNA (MENYU) - Chap Tomon */}
+        <div className="flex-1 flex flex-col h-full overflow-hidden relative">
+          <div className="bg-white px-6 py-4 shadow-sm flex justify-between items-center z-10 border-b border-slate-100 shrink-0">
             <div className="flex items-center gap-3">
               <div className="w-10 h-10 bg-gradient-to-br from-amber-400 to-orange-500 rounded-xl flex items-center justify-center shadow-lg shadow-orange-500/30 transform -rotate-6">
                 <Flame size={24} className="text-white fill-white" />
@@ -345,7 +345,7 @@ const App = () => {
             </div>
           </div>
 
-          <div className="bg-white border-b border-slate-100 overflow-x-auto flex gap-3 p-3 scrollbar-hide">
+          <div className="bg-white border-b border-slate-100 overflow-x-auto flex gap-3 p-3 scrollbar-hide shrink-0">
             {CATEGORIES.map((cat) => (
               <button
                 key={cat.id}
@@ -361,7 +361,7 @@ const App = () => {
             ))}
           </div>
 
-          <div className="flex-1 overflow-y-auto p-4 grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4 content-start bg-slate-50/50">
+          <div className="flex-1 overflow-y-auto p-4 grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4 content-start bg-slate-50/50 pb-24 md:pb-4">
             {filteredMenu.map((item) => (
               <div
                 key={item.id}
@@ -392,7 +392,82 @@ const App = () => {
           </div>
         </div>
 
-        {/* SAVAT: TELEFONDA SUZIB YURUVCHI TUGMA */}
+        {/* 2. SAVAT - KOMPYUTERDA (O'ng tomon) */}
+        <div className="hidden md:flex w-[400px] bg-white border-l border-slate-200 flex-col shadow-xl z-20 h-full shrink-0">
+          <div className="p-6 bg-white border-b border-slate-100 flex justify-between items-center shrink-0">
+            <h3 className="font-black text-xl text-slate-800 flex items-center gap-2">
+              <ShoppingCart className="text-amber-500 fill-amber-500" />{" "}
+              Buyurtma
+            </h3>
+            <span className="bg-amber-100 text-amber-700 px-3 py-1 rounded-lg text-sm font-black">
+              {cart.length}
+            </span>
+          </div>
+          <div className="flex-1 overflow-y-auto p-4 space-y-3 bg-white">
+            {cart.length === 0 ? (
+              <div className="flex flex-col items-center justify-center h-full text-slate-300 space-y-4">
+                <ShoppingBasketIcon size={80} className="opacity-20" />
+                <p className="text-sm font-medium text-slate-400">
+                  Hozircha bo'sh...
+                </p>
+              </div>
+            ) : (
+              cart.map((item, idx) => (
+                <div
+                  key={idx}
+                  className="flex justify-between items-center bg-slate-50 p-3 rounded-2xl border border-slate-100 group hover:border-amber-200 transition"
+                >
+                  <div className="flex items-center gap-4">
+                    <div className="w-12 h-12 bg-white rounded-xl flex items-center justify-center text-2xl shadow-sm border border-slate-100">
+                      {getItemIcon(item.name, item.category)}
+                    </div>
+                    <div>
+                      <div className="font-bold text-sm text-slate-800">
+                        {item.name}
+                      </div>
+                      <div className="text-xs text-slate-500 font-bold mt-0.5">
+                        ${item.price} x {item.qty}
+                      </div>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-3">
+                    <span className="font-black text-slate-800 text-lg">
+                      ${(item.price * item.qty).toFixed(1)}
+                    </span>
+                    <button
+                      onClick={() => removeFromCart(item.id)}
+                      className="w-9 h-9 flex items-center justify-center bg-white text-slate-300 border border-slate-200 rounded-xl hover:bg-red-500 hover:text-white hover:border-red-500 transition shadow-sm"
+                    >
+                      <Trash2 size={18} />
+                    </button>
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
+          <div className="p-6 bg-white border-t border-slate-100 space-y-4 shadow-[0_-10px_40px_rgba(0,0,0,0.05)] z-20">
+            <div className="flex justify-between text-3xl font-black text-slate-900 tracking-tight">
+              <span>Jami:</span>
+              <span>${cartTotal.toFixed(1)}</span>
+            </div>
+            <button
+              onClick={submitOrder}
+              disabled={cart.length === 0 || loading}
+              className="w-full bg-slate-900 hover:bg-slate-800 disabled:bg-slate-100 disabled:text-slate-400 text-white py-5 rounded-2xl font-bold shadow-xl shadow-slate-200 active:scale-95 transition flex items-center justify-center gap-3 text-lg"
+            >
+              {loading ? (
+                "Yuborilmoqda..."
+              ) : (
+                <>
+                  <CheckCircle fill="white" className="text-slate-900" /> ZAKAZ
+                  BERISH
+                </>
+              )}
+            </button>
+          </div>
+        </div>
+
+        {/* 3. SAVAT - TELEFONDA */}
         <div className="md:hidden fixed bottom-6 left-1/2 transform -translate-x-1/2 z-40 w-[90%]">
           <button
             onClick={() => setIsCartOpen(true)}
@@ -408,43 +483,34 @@ const App = () => {
           </button>
         </div>
 
-        {/* SAVAT: KOMPYUTERDA DOIMIY, TELEFONDA MODAL */}
         <div
-          className={`fixed inset-0 z-50 md:static md:inset-auto md:z-20 w-full md:w-[400px] bg-black/50 md:bg-transparent transition-opacity ${
-            isCartOpen
-              ? "opacity-100 visible"
-              : "opacity-0 invisible md:opacity-100 md:visible"
+          className={`fixed inset-0 z-50 bg-black/50 transition-opacity duration-300 md:hidden ${
+            isCartOpen ? "opacity-100 visible" : "opacity-0 invisible"
           }`}
         >
           <div
-            className={`absolute bottom-0 left-0 w-full h-[85vh] md:h-full bg-white rounded-t-[2.5rem] md:rounded-none flex flex-col shadow-2xl transition-transform duration-300 ${
-              isCartOpen ? "translate-y-0" : "translate-y-full md:translate-y-0"
+            className={`absolute bottom-0 left-0 w-full h-[85vh] bg-white rounded-t-[2.5rem] flex flex-col shadow-2xl transition-transform duration-300 ${
+              isCartOpen ? "translate-y-0" : "translate-y-full"
             }`}
           >
-            {/* Tutqich (Telefonda yopish uchun) */}
             <div
               onClick={() => setIsCartOpen(false)}
-              className="w-full h-8 flex justify-center items-center md:hidden cursor-pointer"
+              className="w-full h-8 flex justify-center items-center cursor-pointer shrink-0"
             >
               <div className="w-12 h-1.5 bg-slate-200 rounded-full"></div>
             </div>
-
-            <div className="p-6 bg-white border-b border-slate-100 flex justify-between items-center">
+            <div className="p-6 bg-white border-b border-slate-100 flex justify-between items-center shrink-0">
               <h3 className="font-black text-xl text-slate-800 flex items-center gap-2">
                 <ShoppingCart className="text-amber-500 fill-amber-500" />{" "}
                 Buyurtma
               </h3>
               <button
                 onClick={() => setIsCartOpen(false)}
-                className="md:hidden p-2 bg-slate-100 rounded-full"
+                className="p-2 bg-slate-100 rounded-full"
               >
                 <ChevronDown size={20} />
               </button>
-              <span className="hidden md:block bg-amber-100 text-amber-700 px-3 py-1 rounded-lg text-sm font-black">
-                {cart.length}
-              </span>
             </div>
-
             <div className="flex-1 overflow-y-auto p-4 space-y-3 bg-white">
               {cart.length === 0 ? (
                 <div className="flex flex-col items-center justify-center h-full text-slate-300 space-y-4">
@@ -487,7 +553,7 @@ const App = () => {
                 ))
               )}
             </div>
-            <div className="p-6 bg-white border-t border-slate-100 space-y-4 shadow-[0_-10px_40px_rgba(0,0,0,0.05)] z-20 pb-8 md:pb-6">
+            <div className="p-6 bg-white border-t border-slate-100 space-y-4 shadow-[0_-10px_40px_rgba(0,0,0,0.05)] z-20 pb-8">
               <div className="flex justify-between text-3xl font-black text-slate-900 tracking-tight">
                 <span>Jami:</span>
                 <span>${cartTotal.toFixed(1)}</span>
